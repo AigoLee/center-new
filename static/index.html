@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>基层问题解决中心</title>
+<script src="/vue.global.prod.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <h1>🏢 基层问题解决中心 <span class="demo-badge" v-if="demo">演示模式</span></h1>
+    <div class="mode-switch">
+      <button :class="{active:mode==='user'}" @click="mode='user'">👤 员工端</button>
+      <button :class="{active:mode==='admin'}" @click="mode='admin'">🔧 管理员端</button>
+    </div>
+  </div>
+
+  <!-- ========== 员工端 ========== -->
+  <div class="user-layout" v-if="mode==='user'">
+    <div class="chat-box" ref="chatBox">
+      <div v-if="messages.length===0" style="text-align:center;color:#999;padding-top:120px">
+        <div style="font-size:48px;margin-bottom:12px">💬</div>
+        <div style="font-size:16px">输入问题，智能助手为您解答</div>
+      </div>
+      <div v-for="(m,i) in messages" :key="i" :class="'msg '+m.role">
+        <div class="avatar">{{m.role==='user'?'👤':'🤖'}}</div>
+        <div>
+          <div class="bubble">{{m.content}}</div>
+          <div class="meta" v-if="m.meta">{{m.meta}}</div>
+        </div>
+      </div>
+    </div>
+    <div class="feedback-bar" v-if="waitingFeedback">
+      <button class="btn-resolved" @click="sendFeedback(true)">✅ 已解决</button>
+      <button class="btn-unresolved" @click="sendFeedback(false)">❌ 未解决</button>
+    </div>
+    <div class="input-area">
+      <input v-model="input" @keyup.enter="send" placeholder="请输入你的问题..." :disabled="loading">
+      <button @click="send" :disabled="loading||!input.trim()">{{loading?'分析中...':'发送'}}</button>
+    </div>
+  </div>
+
+  <!-- ========== 管理员端 ========== -->
+  <div class="admin-layout" v-else>
+    <div class="tabs">
+      <button :class="{active:adminTab==='dash'}" @click="adminTab='dash';loadDash()">📊 仪表盘</button>
+      <button :class="{active:adminTab==='review'}" @click="adminTab='review';loadReviews()">📋 待审核({{pendingCount}})</button>
+      <button :class="{active:adminTab==='unresolved'}" @click="adminTab='unresolved';loadUnresolved()">⚠️ 未解决</button>
+      <button :class="{active:adminTab==='histKb'}" @click="adminTab='histKb';kbPage=1;loadKb('history_kb')">📚 历史KB</button>
+      <button :class="{active:adminTab==='matKb'}" @click="adminTab='matKb';kbPage=1;loadKb('material_kb')">📄 材料KB</button>
+    </div>
+
+    <!-- 仪表盘 -->
+    <div v-if="adminTab==='dash'">
+      <div class="stats">
+        <div class="stat-item"><div class="value">{{dash.total||0}}</div><div class="label">总问题数</div></div>
+        <div class="stat-item"><div class="value">{{dash.rate||0}}%</div><div class="label">解决率</div></div>
+        <div class="stat-item"><div class="value">{{dash.pending_review||0}}</div><div class="label">待审核</div></div>
+        <div class="stat-item"><div class="value">{{dash.unresolved||0}}</div><div class="label">未解决</div></div>
+        <div class="stat-item"><div class="value">{{dash.history_kb||0}}</div><div class="label">历史KB条目</div></div>
+        <div class="stat-item"><div class="value">{{dash.material_kb||0}}</div><div class="label">材料KB条目</div></div>
+      </div>
+      <div class="card" v-if="dash.categories&&dash.categories.length">
+        <h3>问题类别分布</h3>
+        <table><tr><th>类别</th><th>数量</th></tr>
+        <tr v-for="c in dash.categories"><td>{{c.name}}</td><td>{{c.count}}</td></tr></table>
+      </div>
+      <div class="card" v-if="dash.recent_unresolved&&dash.recent_unresolved.length">
+        <h3>最近未解决</h3>
+        <div v-for="r in dash.recent_unresolved" style="padding:6px 0;border-bottom:1px solid #eee">
+          [{{r.cat}}] {{r.q}}
+        </div>
+      </div>
+    </div>
+
+    <!-- 待审核 -->
+    <div v-if="adminTab==='review'">
+      <div v-if="reviewList.length===0" style="color:#999;text-align:center;padding:40px">暂无待审核记录</div>
+      <div class="card" v-for="r in reviewList" :key="r.id">
+        <div style="margin-bottom:8px"><b>问题:</b> {{r.q}}</div>
+        <div style="color:#666;margin-bottom:8px"><b>回答:</b> {{r.a?.substring(0,300)}}</div>
+        <div style="background:#f8f9fa;padding:10px;border-radius:6px;margin-bottom:8px">
+          <b>AI纪要:</b> {{r.summary}}
+        </div>
+        <div style="margin-bottom:8px">来源: {{r.source}} | 满意度: {{r.sat||'-'}}</div>
+        <div style="margin-bottom:8px">
+          <b>修改纪要:</b>
+          <textarea v-model="r.editText" rows="3" :placeholder="r.summary"></textarea>
+        </div>
+        <button class="btn-sm primary" @click="doApprove(r)">✅ 通过入库</button>
+        <button class="btn-sm danger" @click="doReject(r)">❌ 驳回</button>
+      </div>
+    </div>
+
+    <!-- 未解决 -->
+    <div v-if="adminTab==='unresolved'">
+      <div v-if="unresolvedList.length===0" style="color:#999;text-align:center;padding:40px">暂无未解决问题</div>
+      <div class="card" v-for="r in unresolvedList" :key="r.id">
+        <div><b>[{{r.category}}]</b> {{r.q}}</div>
+        <div style="color:#666;margin-top:6px">回答: {{r.answer?.substring(0,300)}}</div>
+        <div style="color:#999;font-size:12px;margin-top:4px">来源: {{r.source}} | {{r.time}}</div>
+      </div>
+    </div>
+
+    <!-- 知识库管理 -->
+    <div v-if="adminTab==='histKb'||adminTab==='matKb'">
+      <div class="card">
+        <h3>{{adminTab==='histKb'?'历史知识库':'材料知识库'}} ({{kbTotal}}条)</h3>
+        <div style="display:flex;gap:8px;margin:10px 0" v-if="adminTab==='histKb'">
+          <input v-model="newKb.q" placeholder="问题" style="flex:1">
+          <input v-model="newKb.a" placeholder="回答" style="flex:1">
+          <button class="btn-sm primary" @click="addKbEntry">添加</button>
+        </div>
+        <div style="display:flex;gap:8px;margin:10px 0" v-else>
+          <input v-model="newKb.t" placeholder="标题" style="flex:1">
+          <textarea v-model="newKb.c" placeholder="内容" rows="2" style="flex:2"></textarea>
+          <button class="btn-sm primary" @click="addKbEntry">添加</button>
+        </div>
+      </div>
+      <!-- 条目列表 -->
+      <div class="card" v-for="e in kbEntries" :key="e.id">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <div style="flex:1">
+            <b>{{e.metadata?.title||e.metadata?.question||'无标题'}}</b>
+            <div style="color:#666;font-size:13px;margin-top:4px">{{e.document?.substring(0,200)}}</div>
+            <div style="font-size:12px;color:#999;margin-top:4px">
+              类别:{{e.metadata?.category||'-'}} | 部门:{{e.metadata?.department||'-'}}
+            </div>
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0">
+            <button class="btn-sm warn" @click="openEditKb(e)">✏️ 编辑</button>
+            <button class="btn-sm danger" @click="delKbEntry(e.id)">🗑️ 删除</button>
+          </div>
+        </div>
+      </div>
+      <!-- 分页 -->
+      <div class="pagination" v-if="kbTotalPages>1">
+        <button @click="kbPage=1" :disabled="kbPage===1">首页</button>
+        <button @click="kbPage--" :disabled="kbPage===1">上一页</button>
+        <span class="current">第 {{kbPage}}/{{kbTotalPages}} 页</span>
+        <button @click="kbPage++" :disabled="kbPage===kbTotalPages">下一页</button>
+        <button @click="kbPage=kbTotalPages" :disabled="kbPage===kbTotalPages">末页</button>
+        <select v-model.number="kbPageSize" @change="kbPage=1" style="width:auto;margin:0">
+          <option :value="10">10条</option><option :value="20">20条</option><option :value="50">50条</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 编辑弹窗 -->
+    <div class="modal-mask" v-if="editModal.show" @click.self="editModal.show=false">
+      <div class="modal-box">
+        <h3>编辑知识库条目</h3>
+        <template v-if="adminTab==='histKb'">
+          <label>问题</label>
+          <textarea v-model="editModal.q" rows="3"></textarea>
+          <label>回答</label>
+          <textarea v-model="editModal.a" rows="6"></textarea>
+          <label>类别</label>
+          <input v-model="editModal.cat" placeholder="咨询">
+          <label>部门</label>
+          <input v-model="editModal.dept" placeholder="部门名称">
+        </template>
+        <template v-else>
+          <label>标题</label>
+          <input v-model="editModal.t" placeholder="标题">
+          <label>内容</label>
+          <textarea v-model="editModal.c" rows="8"></textarea>
+          <label>分类</label>
+          <input v-model="editModal.cat" placeholder="制度文件">
+        </template>
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-sm" @click="editModal.show=false">取消</button>
+          <button class="btn-sm primary" @click="saveEditKb">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const {createApp,ref,reactive,nextTick,onMounted,computed,watch} = Vue;
+const API='';
+createApp({
+  setup(){
+    const demo=ref(false);
+    const mode=ref('user');
+    const input=ref(''); const loading=ref(false); const waitingFeedback=ref(false);
+    const messages=reactive([]); const sessionId=ref(null); const questionId=ref(null);
+    const adminTab=ref('dash');
+    const dash=reactive({}); const pendingCount=ref(0);
+    const reviewList=reactive([]); const unresolvedList=reactive([]);
+    const kbEntries=reactive([]); const kbTotal=ref(0); const newKb=reactive({q:'',a:'',t:'',c:''});
+    const kbPage=ref(1); const kbPageSize=ref(10);
+    const editModal=reactive({show:false,id:'',q:'',a:'',t:'',c:'',cat:'',dept:''});
+    const chatBox=ref(null);
+
+    const kbTotalPages = computed(()=>Math.max(1, Math.ceil(kbTotal.value/kbPageSize.value)));
+
+    async function api(method,path,data){
+      try{
+        const opts={method,headers:{'Content-Type':'application/json'}};
+        if(data) opts.body=JSON.stringify(data);
+        const r=await fetch(API+path,opts);
+        return await r.json();
+      }catch(e){return {error:'连接失败: '+e.message}};
+    }
+
+    async function send(){
+      if(!input.value.trim()||loading.value) return;
+      const q=input.value.trim(); input.value=''; loading.value=true; waitingFeedback.value=false;
+      messages.push({role:'user',content:q});
+      const res=await api('POST','/api/ask',{question:q,session_id:sessionId.value});
+      loading.value=false;
+      if(res.error){messages.push({role:'assistant',content:'❌ '+res.error});return;}
+      sessionId.value = res.session_id || sessionId.value;
+      questionId.value=res.question_id;
+      if(res.follow_up){
+        messages.push({role:'assistant',content:res.message+'\n\n👉 '+res.follow_up});
+      }else{
+        const src={history_kb:'📚 历史KB',material_kb:'📄 材料KB',llm_generated:'🤖 AI生成'};
+        messages.push({role:'assistant',content:res.message,
+          meta:(res.source?src[res.source]||res.source:'')+' | '+(res.structured?.category||'')+' | '+(res.structured?.intent||'')});
+        waitingFeedback.value=true;
+      }
+      nextTick(()=>{if(chatBox.value) chatBox.value.scrollTop=chatBox.value.scrollHeight;});
+    }
+
+    async function sendFeedback(ok){
+      waitingFeedback.value=false;
+      const res=await api('POST','/api/feedback',{question_id:questionId.value,resolved:ok,satisfaction:ok?5:2});
+      messages.push({role:'assistant',content:ok?'✅ '+res.message:'⚠️ '+res.message});
+    }
+
+    async function loadDash(){
+      Object.assign(dash,await api('GET','/api/admin/dashboard'));
+      pendingCount.value=dash.pending_review||0;
+    }
+    async function loadReviews(){
+      const d=await api('GET','/api/admin/reviews?status=pending');
+      reviewList.splice(0,reviewList.length,...(d.records||[]).map(r=>({...r,editText:r.summary})));
+      pendingCount.value=reviewList.length;
+    }
+    async function doApprove(r){
+      await api('POST','/api/admin/reviews/'+r.id+'/approve',{edited_summary:r.editText!==r.summary?r.editText:null});
+      loadReviews(); loadDash();
+    }
+    async function doReject(r){
+      await api('POST','/api/admin/reviews/'+r.id+'/reject',{});
+      loadReviews(); loadDash();
+    }
+    async function loadUnresolved(){
+      const d=await api('GET','/api/admin/unresolved');
+      unresolvedList.splice(0,unresolvedList.length,...(d.records||[]));
+    }
+    async function loadKb(kbName){
+      const off = (kbPage.value-1) * kbPageSize.value;
+      const d=await api('GET','/api/admin/kb/'+kbName+'?offset='+off+'&limit='+kbPageSize.value);
+      kbEntries.splice(0,kbEntries.length,...(d.entries||[]));
+      kbTotal.value=d.total||0;
+    }
+    async function addKbEntry(){
+      const kbName=adminTab.value==='histKb'?'history_kb':'material_kb';
+      const body=adminTab.value==='histKb'
+        ?{question:newKb.q,answer:newKb.a,category:'咨询'}
+        :{title:newKb.t,content:newKb.c};
+      await api('POST','/api/admin/kb/'+kbName+'/add',body);
+      newKb.q='';newKb.a='';newKb.t='';newKb.c='';
+      loadKb(kbName);
+    }
+    async function delKbEntry(id){
+      const kbName=adminTab.value==='histKb'?'history_kb':'material_kb';
+      await api('DELETE','/api/admin/kb/'+kbName+'/'+id);
+      loadKb(kbName);
+    }
+
+    function openEditKb(e){
+      const m = e.metadata || {};
+      editModal.id = e.id;
+      editModal.show = true;
+      if(adminTab.value==='histKb'){
+        editModal.q = m.question || '';
+        editModal.a = m.answer || '';
+        editModal.cat = m.category || '';
+        editModal.dept = m.department || '';
+      }else{
+        editModal.t = m.title || '';
+        editModal.c = e.document || '';
+        editModal.cat = m.category || '';
+      }
+    }
+
+    async function saveEditKb(){
+      const kbName=adminTab.value==='histKb'?'history_kb':'material_kb';
+      const body = adminTab.value==='histKb'
+        ? {question:editModal.q, answer:editModal.a, category:editModal.cat, department:editModal.dept}
+        : {title:editModal.t, content:editModal.c, category:editModal.cat};
+      await api('PUT','/api/admin/kb/'+kbName+'/'+editModal.id, body);
+      editModal.show = false;
+      loadKb(kbName);
+    }
+
+    // 页码或页大小变化时自动重新加载
+    watch([kbPage, kbPageSize], ()=>{
+      const kbName=adminTab.value==='histKb'?'history_kb':'material_kb';
+      if(adminTab.value==='histKb'||adminTab.value==='matKb') loadKb(kbName);
+    });
+
+    onMounted(async()=>{
+      const h=await api('GET','/api/admin/dashboard');
+      demo.value=!h.error&&h.total===undefined?false:false;
+      // 简单探测演示模式
+      // try{
+      //   const t=await api('POST','/api/ask',{question:'测试'});
+      //   demo.value=t.message&&t.message.includes('演示模式');
+      // }catch(e){}
+      loadDash();
+    });
+
+    return {demo,mode,input,loading,waitingFeedback,messages,sessionId,questionId,
+            adminTab,dash,pendingCount,reviewList,unresolvedList,kbEntries,kbTotal,newKb,chatBox,
+            kbPage,kbPageSize,kbTotalPages,editModal,
+            send,sendFeedback,loadDash,loadReviews,doApprove,doReject,loadUnresolved,loadKb,addKbEntry,delKbEntry,openEditKb,saveEditKb};
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
