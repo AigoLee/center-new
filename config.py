@@ -12,12 +12,24 @@ MATERIAL_KB = "material_kb"
 
 # ---------- LLM 配置 ----------
 # 通过环境变量配置，不硬编码 Key
-# $env:DEEPSEEK_API_KEY="你的key"
-# $env:DEEPSEEK_API_URL="https://api.deepseek.com"
-# $env:DEEPSEEK_MODEL="deepseek-v4-flash"
+# 当前使用: Watt LLM / Qwen3-Next-80B
+#   $env:DEEPSEEK_API_KEY="sk-Ks7..."   (Watt LLM key)
+#   $env:DEEPSEEK_API_URL="https://wattllm.service.ai-next.bigwatt.cn/v1/"
+#   $env:DEEPSEEK_MODEL="Qwen3-Next-80B-A3B-Instruct"
+#
+# 备选 1: DeepSeek 官方
+#   $env:DEEPSEEK_API_KEY="sk-e08..."   (DeepSeek key)
+#   $env:DEEPSEEK_API_URL="https://api.deepseek.com"
+#   $env:DEEPSEEK_MODEL="deepseek-v4-flash"
+#
+# 备选 2: AutoDL
+#   $env:DEEPSEEK_API_KEY="H5LZK..."    (AutoDL key)
+#   $env:DEEPSEEK_API_URL="https://www.autodl.art/api/v1/"
+#   $env:DEEPSEEK_MODEL="DeepSeek-V4-Flash"
+
 LLM_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-LLM_URL = os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com")
-LLM_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+LLM_URL = os.environ.get("DEEPSEEK_API_URL", "https://wattllm.service.ai-next.bigwatt.cn/v1/")
+LLM_MODEL = os.environ.get("DEEPSEEK_MODEL", "Qwen3-Next-80B-A3B-Instruct")
 
 # ---------- 检索参数 ----------
 TOP_K = 5
